@@ -45,8 +45,6 @@
  */
 
 void captureInline2mhz() {
-  unsigned int i;
-
   /*
    * basic trigger, wait until all trigger conditions are met on port.
    * this needs further testing, but basic tests work as expected.
@@ -60,7 +58,7 @@ void captureInline2mhz() {
    * we cannot afford any timing interference so we absolutely
    * cannot have any interrupts firing.
    */
-  cli();
+  disableInterrupts();
 
   /*
    * toggle pin a few times to activate trigger for debugging.
@@ -87,22 +85,30 @@ void captureInline2mhz() {
    *
    */
 
-#undef INLINE_NOP
-#define INLINE_NOP		__asm__("nop\n\t""rjmp 1f\n\t""1:\n\t""rjmp 2f\n\t""2:\n\t");
-
-  #include "inline_capture.h"
-
+  #if defined(SAM)
+    // Arduino Due is fast enough to not require inlined capture for 2MHz.
+    for (size_t i = 0 ; i < readCount; i++) {
+      logicdata[i] = CHANPIN;
+      __asm__("nop\n\t""nop\n\t""nop\n\t""nop\n\t");
+      __asm__("nop\n\t""nop\n\t""nop\n\t""nop\n\t");
+      __asm__("nop\n\t""nop\n\t");
+    }
+  #else
+    #undef INLINE_NOP
+    #define INLINE_NOP		__asm__("nop\n\t""rjmp 1f\n\t""1:\n\t""rjmp 2f\n\t""2:\n\t")
+    #include "inline_capture.h"
+  #endif
 
   DEBUG_OFF; /* debug timing measurement */
 
   /* re-enable interrupts now that we're done sampling. */
-  sei();
+  enableInterrupts();
 
   /*
    * dump the samples back to the SUMP client.  nothing special
    * is done for any triggers, this is effectively the 0/100 buffer split.
    */
-  for (i = 0 ; i < readCount; i++) {
+  for (size_t i = 0 ; i < readCount; i++) {
 #ifdef USE_PORTD
     Serial.write(logicdata[i] >> 2);
 #else

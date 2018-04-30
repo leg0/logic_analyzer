@@ -95,7 +95,17 @@ void captureInline2mhz(void);
  * Arduino device profile:      ols.profile-agla.cfg
  * Arduino Mega device profile: ols.profile-aglam.cfg
  */
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+#if defined(SAM)
+  #define CHANPIN ((PIOA->PIO_PDSR) & 0xFF)
+  #define CHAN0 69 // PA0
+  #define CHAN1 68 // PA1
+  #define CHAN2 61 // PA2
+  #define CHAN3 60 // PA3
+  #define CHAN4 59 // PA4
+  #define CHAN5 23 // PA14
+  #define CHAN6 58 // PA6
+  #define CHAN7 31 // PA7
+#elif defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
 #define CHANPIN PINA
 #define CHAN0 22
 #define CHAN1 23
@@ -153,7 +163,10 @@ void captureInline2mhz(void);
  * ATmega328:  1024 (or lower)
  * ATmega2560: 7168 (or lower)
  */
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+#if defined(SAM)
+  #define DEBUG_CAPTURE_SIZE 93000
+  #define CAPTURE_SIZE 93000
+#elif defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
 #define DEBUG_CAPTURE_SIZE 7168
 #define CAPTURE_SIZE 7168
 #elif defined(__AVR_ATmega32U4__)
@@ -167,7 +180,13 @@ void captureInline2mhz(void);
 #define CAPTURE_SIZE 532
 #endif
 
-#ifdef USE_PORTD
+#if defined(SAM)
+  // See https://www.arduino.cc/en/Hacking/PinMappingSAM3X
+  // Arduino 25 = PD0
+  #define DEBUG_ENABLE pinMode(25, OUTPUT)
+  #define DEBUG_ON PIOD->PIO_PDSR |= 1
+  #define DEBUG_OFF PIOD->PIO_PDSR &= ~1
+#elif defined(USE_PORTD)
 #define DEBUG_ENABLE DDRB = DDRB | B00000001
 #define DEBUG_ON PORTB = B00000001
 #define DEBUG_OFF PORTB = B00000000
@@ -210,6 +229,14 @@ unsigned int delayTime = 0;
 unsigned long divider = 0;
 boolean rleEnabled = 0;
 
+#if defined(SAM)
+  #define disableInterrupts __disable_irq
+  #define enableInterrupts __enable_irq
+#else
+  #define disableInterrupts cli
+  #define enableInterrupts sei
+#endif
+
 void setup()
 {
   Serial.begin(115200);
@@ -239,6 +266,11 @@ void setup()
 #endif
 #endif /* Mega */
 
+#if defined(SAM)
+  // Set up 1kHz test signal at pin 13.
+  pinMode(13, OUTPUT);
+  analogWrite(13, 64);
+#endif
 #if 0
 
   /*
@@ -548,7 +580,7 @@ void captureMicro() {
    * we're hand padding loops with NOP instructions so we absolutely
    * cannot have any interrupts firing.
    */
-  cli();
+  disableInterrupts();
 
   /*
    * toggle pin a few times to activate trigger for debugging.
@@ -616,7 +648,7 @@ void captureMicro() {
   }
 
   /* re-enable interrupts now that we're done sampling. */
-  sei();
+  enableInterrupts();
 
   /*
    * dump the samples back to the SUMP client.  nothing special
@@ -725,7 +757,7 @@ void triggerMicro() {
    * we're hand padding loops with NOP instructions so we absolutely
    * cannot have any interrupts firing.
    */
-  cli();
+  disableInterrupts();
 
   /*
    * toggle pin a few times to activate trigger for debugging.
@@ -876,7 +908,7 @@ void triggerMicro() {
   }
 
   /* re-enable interrupts */
-  sei();
+  enableInterrupts();
 
   /*
    * trigger has fired and we have read delayCount of samples after the
@@ -954,22 +986,11 @@ void get_metadata() {
 
   /* sample memory */
   Serial.write((uint8_t)0x21);
-  Serial.write((uint8_t)0x00);
-  Serial.write((uint8_t)0x00);
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
-  /* 7168 bytes */
-  Serial.write((uint8_t)0x1C);
-  Serial.write((uint8_t)0x00);
-#elif defined(__AVR_ATmega328P__)
-  /* 1024 bytes */
-  Serial.write((uint8_t)0x04);
-  Serial.write((uint8_t)0x00);
-#else
-  /* 532 bytes */
-  Serial.write((uint8_t)0x02);
-  Serial.write((uint8_t)0x14);
-#endif /* Mega */
-
+  Serial.write((uint8_t)((MAX_CAPTURE_SIZE >> 24) & 0xFF));
+  Serial.write((uint8_t)((MAX_CAPTURE_SIZE >> 16) & 0xFF));
+  Serial.write((uint8_t)((MAX_CAPTURE_SIZE >> 8) & 0xFF));
+  Serial.write((uint8_t)(MAX_CAPTURE_SIZE & 0xFF));
+  
   /* sample rate (4MHz) */
   Serial.write((uint8_t)0x23);
   Serial.write((uint8_t)0x00);
@@ -979,7 +1000,7 @@ void get_metadata() {
 
   /* number of probes (6 by default on Arduino, 8 on Mega) */
   Serial.write((uint8_t)0x40);
-#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
+#if defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__) || defined(SAM)
   Serial.write((uint8_t)0x08);
 #else
 #ifdef CHAN5
